@@ -1,5 +1,5 @@
 """Simple RAG: chunk markdown docs, index with TF-IDF, retrieve top-k by cosine similarity.
-No extra API key or model download needed. Can be swapped for embeddings + a vector DB later."""
+No extra API key or model download needed."""
 import re
 from pathlib import Path
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -9,7 +9,16 @@ from sklearn.metrics.pairwise import cosine_similarity
 class Retriever:
     def __init__(self, kb_dir: str = "knowledge_base"):
         self.chunks = []
-        for p in sorted(Path(kb_dir).glob("*.md")):
+        self.vec = None
+        self.matrix = None
+        base = Path(__file__).parent
+        kb = Path(kb_dir)
+        if not kb.is_absolute():
+            kb = base / kb
+        files = list(kb.glob("*.md"))
+        # also accept notes placed next to the code (e.g. uploaded flat to GitHub)
+        files += [p for p in base.glob("*.md") if p.name.lower() != "readme.md"]
+        for p in sorted(set(files)):
             self._add(p.name, p.read_text(encoding="utf-8"))
         self._fit()
 
@@ -20,6 +29,10 @@ class Retriever:
                 self.chunks.append({"source": source, "text": part})
 
     def _fit(self):
+        if not self.chunks:
+            self.vec = None
+            self.matrix = None
+            return
         self.vec = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
         self.matrix = self.vec.fit_transform([c["text"] for c in self.chunks])
 
@@ -29,7 +42,7 @@ class Retriever:
         self._fit()
 
     def search(self, query: str, k: int = 3, min_score: float = 0.05):
-        if not self.chunks:
+        if not self.chunks or self.vec is None:
             return []
         scores = cosine_similarity(self.vec.transform([query]), self.matrix)[0]
         top = scores.argsort()[::-1][:k]
